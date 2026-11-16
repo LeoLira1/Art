@@ -14,9 +14,13 @@ aparece no tooltip ao passar o mouse num nó, ou ao tocar nele no celular/tablet
 | · pontinhos | decoração |
 
 O tamanho da falta/sobra cresce com a raiz da quantidade física
-(`4 + √|qtd| × 3,2`, escalado pelo menor lado da tela ÷ 900). Fios fortes ligam
-divergências do mesmo produto (com ou sem prefixo `US`) ou do mesmo cooperado
-(FALTANDO, SOBRANDO e Invertido não contam).
+(`4 + √|qtd| × 3,2`, escalado pelo menor lado da tela ÷ 900).
+
+Fios de relação ligam divergências do mesmo produto (com ou sem prefixo `US`)
+ou do mesmo cooperado (FALTANDO, SOBRANDO e Invertido não contam). Cada nó liga
+só às **2 mais próximas** do mesmo grupo, na posição atual, recalculado a cada
+~2 s com fade (opacidade 0,35). Mouse em cima de um nó (ou toque) acende o
+grupo dele inteiro, conectado, a 0,9 e apaga o resto para 0,15.
 
 Toque no vazio liga/desliga a tela cheia.
 

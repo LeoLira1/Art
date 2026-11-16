@@ -37,7 +37,7 @@ const pop = document.getElementById("pop");
 const popK = pop.querySelector(".k"), popN = pop.querySelector(".n"), popS = pop.querySelector(".s");
 
 let W = 1, H = 1, DPR = 1, S = 1, SC = 1;
-let nodes = [], links = [];
+let nodes = [];
 const rnd = (a, b) => a + Math.random() * (b - a);
 const ease = x => x <= 0 ? 0 : x >= 1 ? 1 : 1 - Math.pow(1 - x, 3);
 
@@ -99,12 +99,70 @@ function aplicar(dados, agora) {
   for (const n of velhos.values()) { n.morre = agora; vivos.push(n); }
   nodes = vivos;
   primeira = false;
-  // fios fortes: mesmo produto (com/sem US) ou mesmo cooperado
-  links = [];
-  const divs = nodes.filter(n => !n.morre && n.kind !== "tarefa");
-  for (let i = 0; i < divs.length; i++) for (let j = i + 1; j < divs.length; j++) {
-    const a = divs[i], b = divs[j];
-    if ((a.chP && a.chP === b.chP) || (a.chC && a.chC === b.chC)) links.push([a, b]);
+  // grupos dos fios de relação: mesmo produto (com/sem US) ou mesmo cooperado
+  grupos = new Map();
+  for (const n of nodes) {
+    if (n.morre) continue;
+    for (const g of gruposDe(n)) { let l = grupos.get(g); if (!l) grupos.set(g, l = []); l.push(n); }
+  }
+  for (const [g, l] of grupos) if (l.length < 2) grupos.delete(g);
+  ultimoRecalc = -1e9; // recalcula os fios já no próximo quadro
+}
+
+// ── fios de relação ────────────────────────────────────────────────────────
+// Cada divergência liga só às K_VIZ mais próximas do mesmo grupo (na posição
+// atual), recalculado a cada RECALC_MS; fio que entra/sai faz fade. Com um nó
+// em foco, o grupo dele ganha também uma árvore geradora mínima (o "cacho"
+// inteiro conectado) e os fios dele vão a .9; o resto cai para .15.
+const K_VIZ = 2, RECALC_MS = 2000, FADE_S = .8;
+const OP_BASE = .35, OP_DESTAQUE = .9, OP_APAGADO = .15;
+let grupos = new Map();          // chave do grupo → nós vivos
+const arestas = new Map();       // "idA|idB" → {a, b, g:Set, op, alvo, lvl}
+let ultimoRecalc = -1e9, focoGrupos = "";
+
+function gruposDe(n) {
+  const g = [];
+  if (n.kind === "tarefa") return g;
+  if (n.chP) g.push("P:" + n.chP);
+  if (n.chC) g.push("C:" + n.chC);
+  return g;
+}
+const d2 = (a, b) => (a.px - b.px) ** 2 + (a.py - b.py) ** 2;
+
+function recalcularFios(gFoco) {
+  const quer = new Map();
+  const add = (a, b, g) => {
+    const k = a.id < b.id ? a.id + "|" + b.id : b.id + "|" + a.id;
+    let e = quer.get(k);
+    if (!e) quer.set(k, e = { a, b, g: new Set() });
+    e.g.add(g);
+  };
+  for (const [g, l] of grupos) {
+    const vivos = l.filter(n => !n.morre);
+    if (vivos.length < 2) continue;
+    for (const a of vivos) {
+      const viz = [];
+      for (const b of vivos) if (b !== a) viz.push([b, d2(a, b)]);
+      viz.sort((x, y) => x[1] - y[1]);
+      for (let i = 0; i < Math.min(K_VIZ, viz.length); i++) add(a, viz[i][0], g);
+    }
+    if (gFoco.includes(g)) { // Prim: garante o cacho inteiro conectado
+      const dentro = [vivos[0]], fora = vivos.slice(1);
+      while (fora.length) {
+        let bd = Infinity, par = null, bi = -1;
+        for (const a of dentro) for (let i = 0; i < fora.length; i++) {
+          const d = d2(a, fora[i]); if (d < bd) { bd = d; par = [a, fora[i]]; bi = i; }
+        }
+        add(par[0], par[1], g);
+        dentro.push(fora.splice(bi, 1)[0]);
+      }
+    }
+  }
+  for (const [k, e] of arestas) if (!quer.has(k)) e.alvo = 0;
+  for (const [k, q] of quer) {
+    const e = arestas.get(k);
+    if (e) { e.alvo = 1; e.g = q.g; e.a = q.a; e.b = q.b; }
+    else arestas.set(k, { a: q.a, b: q.b, g: q.g, op: 0, alvo: 1, lvl: null });
   }
 }
 
@@ -313,15 +371,25 @@ function quadro(agora) {
     ctx.stroke();
   }
 
-  // fios fortes: mesmo produto / cooperado
-  if (links.length) {
-    ctx.lineWidth = 1.1; ctx.strokeStyle = "rgba(20,20,20,.55)";
+  // fios de relação: mesmo produto / cooperado
+  const gF = foco && !foco.morre ? gruposDe(foco).filter(g => grupos.has(g)) : [];
+  const chaveF = gF.join(",");
+  if (agora - ultimoRecalc > RECALC_MS || chaveF !== focoGrupos) {
+    recalcularFios(gF); ultimoRecalc = agora; focoGrupos = chaveF;
+  }
+  if (arestas.size) {
+    ctx.lineWidth = 1.1; ctx.strokeStyle = "rgb(20,20,20)";
     // um stroke por fio: num path único, os fios que se cruzam viram um
     // polígono complexo e o rasterizador (sobretudo sem GPU) engasga
-    for (const [a, b] of links) {
-      const f = Math.min(a.a, b.a); if (f <= 0) continue;
+    for (const [k, e] of arestas) {
+      e.op = Math.max(0, Math.min(1, e.op + (e.alvo ? dt : -dt) / FADE_S));
+      if (!e.alvo && e.op <= 0) { arestas.delete(k); continue; }
+      const alvoLvl = !gF.length ? OP_BASE : gF.some(g => e.g.has(g)) ? OP_DESTAQUE : OP_APAGADO;
+      e.lvl = e.lvl == null ? alvoLvl : e.lvl + (alvoLvl - e.lvl) * Math.min(1, dt * 6);
+      const f = e.op * e.lvl * Math.min(e.a.a, e.b.a);
+      if (f <= .005) continue;
       ctx.globalAlpha = f;
-      ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(e.a.px, e.a.py); ctx.lineTo(e.b.px, e.b.py); ctx.stroke();
     }
     ctx.globalAlpha = 1;
   }
@@ -373,7 +441,8 @@ function quadro(agora) {
 }
 requestAnimationFrame(quadro);
 // diagnóstico (console / testes): estado da rede, sem nada na tela
-window.__descanso = () => ({ custo, nos: nodes.filter(n => !n.morre).length, fios: links.length,
+window.__descanso = () => ({ custo, nos: nodes.filter(n => !n.morre).length, fios: [...arestas.values()].filter(e => e.alvo).length,
+  destaque: [...arestas.values()].filter(e => e.alvo && e.lvl > .8).length,
   versao, pos: nodes.filter(n => !n.morre).map(n => ({ id: n.id, x: n.px, y: n.py, r: n.rd })) });
 })();
 </script>
