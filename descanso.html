@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; background: #f4f4f2; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; cursor: default;
+           touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  #pop { position: fixed; left: 0; top: 0; pointer-events: none; z-index: 5;
+         background: rgba(17,17,17,.92); color: #f4f4f2; border-radius: 10px;
+         padding: 10px 14px; max-width: min(340px, 78vw); opacity: 0;
+         transition: opacity .18s ease; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+         font: 13px/1.35 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #pop .k { font-size: 10px; letter-spacing: .16em; text-transform: uppercase; opacity: .6; }
+  #pop .n { font-size: 14px; font-weight: 500; margin-top: 4px; }
+  #pop .s { opacity: .75; margin-top: 3px; }
+  #pop .s:empty { display: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="pop"><div class="k"></div><div class="n"></div><div class="s"></div></div>
+<script>
+(() => {
+"use strict";
+const BG = "#f4f4f2";
+const COR = { urgente: "#c8102e", normal: "#d9a400", quando_der: "#2e8b57" };
+const RT  = { urgente: 9, normal: 6, quando_der: 4.5 };
+const VEL = 0.0021;          // deriva, em fração da tela por segundo
+const BX = 0.06, BY = 0.10;  // margens laterais / cima-baixo
+const N_POEIRA = 70;
+
+const cv = document.getElementById("c");
+const ctx = cv.getContext("2d");
+const pop = document.getElementById("pop");
+const popK = pop.querySelector(".k"), popN = pop.querySelector(".n"), popS = pop.querySelector(".s");
+
+let W = 1, H = 1, DPR = 1, S = 1, SC = 1;
+let nodes = [];
+const rnd = (a, b) => a + Math.random() * (b - a);
+const ease = x => x <= 0 ? 0 : x >= 1 ? 1 : 1 - Math.pow(1 - x, 3);
+
+// ── tamanho ────────────────────────────────────────────────────────────────
+let sprites = new Map();
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = Math.max(1, document.documentElement.clientWidth || innerWidth);
+  H = Math.max(1, document.documentElement.clientHeight || innerHeight);
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  S = Math.min(W, H); SC = S / 900;
+  sprites.clear();
+}
+addEventListener("resize", resize);
+if (window.ResizeObserver) new ResizeObserver(resize).observe(document.documentElement);
+resize();
+
+// ── nós ────────────────────────────────────────────────────────────────────
+const COOP_FALSO = /^\s*(falt|sobr|invert)/i;
+const coopReal = c => !!c && !COOP_FALSO.test(c);
+const normCoop = c => c.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
+const normCod = c => String(c || "").toUpperCase().trim().replace(/^US/, "");
+
+function novoMovel(o) {
+  const ang = rnd(0, Math.PI * 2);
+  o.x = rnd(BX + .04, 1 - BX - .04); o.y = rnd(BY + .04, 1 - BY - .04);
+  o.vx = Math.cos(ang) * rnd(.4, 1); o.vy = Math.sin(ang) * rnd(.4, 1);
+  o.ph = rnd(0, Math.PI * 2); o.px = o.x * W; o.py = o.y * H;
+  return o;
+}
+const poeira = Array.from({ length: N_POEIRA }, () => novoMovel({ r: rnd(1, 2.2), a: 1 }));
+
+function raioDiv(q) { return 4 + Math.sqrt(Math.abs(q)) * 3.2; }
+
+let primeira = true;
+function aplicar(dados, agora) {
+  const velhos = new Map(nodes.filter(n => !n.morre).map(n => [n.id, n]));
+  const vivos = [];
+  const entra = (id, campos, rT) => {
+    let n = velhos.get(id);
+    if (n) { velhos.delete(id); Object.assign(n, campos); n.rT = rT; }
+    else {
+      n = novoMovel(Object.assign({ id, r: rT, rT, hov: 0 }, campos));
+      n.nasce = agora + (primeira ? rnd(0, 1600) : 0);
+    }
+    vivos.push(n);
+  };
+  for (const d of (dados.d || [])) {
+    const [id, cod, nome, delta, coop, qtd] = d;
+    entra("d" + id, { kind: delta < 0 ? "falta" : "sobra", cod, nome, coop, qtd,
+                      chP: normCod(cod), chC: coopReal(coop) ? normCoop(coop) : "" }, raioDiv(delta));
+  }
+  for (const t of (dados.t || [])) {
+    const [id, pri, texto, prazo] = t;
+    const p = COR[pri] ? pri : "normal";
+    entra("t" + id, { kind: "tarefa", pri: p, nome: texto, prazo }, RT[p]);
+  }
+  for (const n of velhos.values()) { n.morre = agora; vivos.push(n); }
+  nodes = vivos;
+  primeira = false;
+  // grupos dos fios de relação: mesmo produto (com/sem US) ou mesmo cooperado
+  grupos = new Map();
+  for (const n of nodes) {
+    if (n.morre) continue;
+    for (const g of gruposDe(n)) { let l = grupos.get(g); if (!l) grupos.set(g, l = []); l.push(n); }
+  }
+  for (const [g, l] of grupos) if (l.length < 2) grupos.delete(g);
+  ultimoRecalc = -1e9; // recalcula os fios já no próximo quadro
+}
+
+// ── fios de relação ────────────────────────────────────────────────────────
+// Cada divergência liga só às K_VIZ mais próximas do mesmo grupo (na posição
+// atual), recalculado a cada RECALC_MS; fio que entra/sai faz fade. Com um nó
+// em foco, o grupo dele ganha também uma árvore geradora mínima (o "cacho"
+// inteiro conectado) e os fios dele vão a .9; o resto cai para .15.
+const K_VIZ = 2, RECALC_MS = 2000, FADE_S = .8;
+const OP_BASE = .35, OP_DESTAQUE = .9, OP_APAGADO = .15;
+let grupos = new Map();          // chave do grupo → nós vivos
+const arestas = new Map();       // "idA|idB" → {a, b, g:Set, op, alvo, lvl}
+let ultimoRecalc = -1e9, focoGrupos = "";
+
+function gruposDe(n) {
+  const g = [];
+  if (n.kind === "tarefa") return g;
+  if (n.chP) g.push("P:" + n.chP);
+  if (n.chC) g.push("C:" + n.chC);
+  return g;
+}
+const d2 = (a, b) => (a.px - b.px) ** 2 + (a.py - b.py) ** 2;
+
+function recalcularFios(gFoco) {
+  const quer = new Map();
+  const add = (a, b, g) => {
+    const k = a.id < b.id ? a.id + "|" + b.id : b.id + "|" + a.id;
+    let e = quer.get(k);
+    if (!e) quer.set(k, e = { a, b, g: new Set() });
+    e.g.add(g);
+  };
+  for (const [g, l] of grupos) {
+    const vivos = l.filter(n => !n.morre);
+    if (vivos.length < 2) continue;
+    for (const a of vivos) {
+      const viz = [];
+      for (const b of vivos) if (b !== a) viz.push([b, d2(a, b)]);
+      viz.sort((x, y) => x[1] - y[1]);
+      for (let i = 0; i < Math.min(K_VIZ, viz.length); i++) add(a, viz[i][0], g);
+    }
+    if (gFoco.includes(g)) { // Prim: garante o cacho inteiro conectado
+      const dentro = [vivos[0]], fora = vivos.slice(1);
+      while (fora.length) {
+        let bd = Infinity, par = null, bi = -1;
+        for (const a of dentro) for (let i = 0; i < fora.length; i++) {
+          const d = d2(a, fora[i]); if (d < bd) { bd = d; par = [a, fora[i]]; bi = i; }
+        }
+        add(par[0], par[1], g);
+        dentro.push(fora.splice(bi, 1)[0]);
+      }
+    }
+  }
+  for (const [k, e] of arestas) if (!quer.has(k)) e.alvo = 0;
+  for (const [k, q] of quer) {
+    const e = arestas.get(k);
+    if (e) { e.alvo = 1; e.g = q.g; e.a = q.a; e.b = q.b; }
+    else arestas.set(k, { a: q.a, b: q.b, g: q.g, op: 0, alvo: 1, lvl: null });
+  }
+}
+
+// ── sprites (sombra pré-renderizada: shadowBlur por quadro trava celular) ──
+const OVER = 1.42; // cabe o hover (+35%) e a respiração (+4%) sem perder nitidez
+function sprite(kind, rBase) {
+  const R = rBase * SC * OVER;
+  const key = kind + "|" + Math.round(R * DPR * 2);
+  let sp = sprites.get(key);
+  if (sp) return sp;
+  if (sprites.size > 400) sprites.clear();
+  const blur = R * 1.2, ox = R * .25, oy = R * .35;
+  const half = Math.ceil(R + blur + Math.max(ox, oy) + 3);
+  const c = document.createElement("canvas");
+  c.width = c.height = Math.ceil(half * 2 * DPR);
+  const g = c.getContext("2d");
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const x = half, y = half;
+  // sombra: offsets/blur NÃO seguem o transform, por isso o × DPR
+  g.shadowColor = "rgba(0,0,0,.28)"; g.shadowBlur = blur * DPR;
+  g.shadowOffsetX = ox * DPR; g.shadowOffsetY = oy * DPR;
+  g.beginPath(); g.arc(x, y, R, 0, Math.PI * 2);
+  if (kind === "falta") {
+    const gr = g.createRadialGradient(x - R * .35, y - R * .35, R * .1, x, y, R);
+    gr.addColorStop(0, "#3a3a3a"); gr.addColorStop(1, "#050505");
+    g.fillStyle = gr; g.fill();
+  } else if (kind === "sobra") {
+    g.fillStyle = BG; g.fill();
+    g.shadowColor = "transparent";
+    const lw = Math.max(1.5 * OVER, R * .18);
+    g.lineWidth = lw; g.strokeStyle = "#111";
+    g.beginPath(); g.arc(x, y, R - lw / 2, 0, Math.PI * 2); g.stroke();
+  } else {
+    g.fillStyle = COR[kind]; g.fill();
+  }
+  sp = { c, half };
+  sprites.set(key, sp);
+  return sp;
+}
+
+// ── interação ──────────────────────────────────────────────────────────────
+let mouse = null;          // {x,y} enquanto o mouse está sobre a tela
+let fixo = null, fixoAte = 0; // toque: nó fixado por 4 s
+let foco = null, focoMostrado = null;
+let ultimoTipo = "mouse";
+
+function hit(x, y, tol) {
+  let best = null, bd = 1e9;
+  for (const n of nodes) {
+    if (n.morre || n.a < .5) continue;
+    const d = Math.hypot(n.px - x, n.py - y);
+    if (d < n.rd + tol && d < bd) { bd = d; best = n; }
+  }
+  return best;
+}
+
+function conteudo(n) {
+  if (n.kind === "tarefa") {
+    popK.textContent = "TAREFA · " + n.pri.replace("_", " ");
+    popN.textContent = n.nome;
+    popS.textContent = n.prazo ? "prazo " + n.prazo : "";
+  } else {
+    popK.textContent = (n.kind === "falta" ? "FALTA" : "SOBRA") + " · " + n.cod;
+    popN.textContent = n.nome;
+    popS.textContent = n.qtd + (coopReal(n.coop) ? " · " + n.coop : "");
+  }
+}
+function posicionar(x, y) {
+  const w = pop.offsetWidth, h = pop.offsetHeight, m = 10;
+  let L = x + 16, T = y + 16;
+  if (L + w > W - m) L = x - w - 16;
+  if (T + h > H - m) T = y - h - 16;
+  L = Math.max(m, Math.min(L, W - w - m));
+  T = Math.max(m, Math.min(T, H - h - m));
+  pop.style.transform = `translate(${Math.round(L)}px,${Math.round(T)}px)`;
+}
+
+cv.addEventListener("pointerdown", e => { ultimoTipo = e.pointerType || "mouse"; });
+// desktop: mouse parado 3 s fora de qualquer nó → cursor some, como num descanso de tela
+let mouseParadoDesde = performance.now(), cursorOculto = false;
+cv.addEventListener("pointermove", e => {
+  if (e.pointerType !== "mouse") return;
+  mouse = { x: e.clientX, y: e.clientY };
+  mouseParadoDesde = performance.now(); cursorOculto = false;
+});
+cv.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") mouse = null; });
+cv.addEventListener("click", e => {
+  const toque = ultimoTipo !== "mouse";
+  const n = hit(e.clientX, e.clientY, toque ? 22 : 6);
+  if (n) {
+    if (toque) { fixo = n; fixoAte = performance.now() + 4000; }
+    return;
+  }
+  fixo = null;
+  telaCheia();
+});
+
+function telaCheia() {
+  const docs = [];
+  try { if (window.parent && window.parent !== window) docs.push(window.parent.document); } catch (e) {}
+  docs.push(document);
+  const tenta = i => {
+    const d = docs[i];
+    if (!d) return;
+    try {
+      const fe = d.fullscreenElement || d.webkitFullscreenElement;
+      if (fe) { (d.exitFullscreen || d.webkitExitFullscreen).call(d); return; }
+      const el = d.documentElement;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (!req) return tenta(i + 1);
+      const p = req.call(el);
+      if (p && p.catch) p.catch(() => tenta(i + 1));
+    } catch (e) { tenta(i + 1); }
+  };
+  tenta(0);
+}
+
+// ── dados vindos da página do Streamlit (blocos escondidos .dsc-chunk) ──────
+let versao = null;
+function lerDados() {
+  let pd;
+  try { pd = window.parent.document; } catch (e) { return; }
+  if (!pd) return;
+  const els = pd.querySelectorAll(".dsc-chunk");
+  if (!els.length) return;
+  const v = els[0].getAttribute("data-v"), tot = +els[0].getAttribute("data-n");
+  if (v === versao) return;
+  const partes = new Array(tot);
+  for (const el of els) {
+    if (el.getAttribute("data-v") !== v) return; // troca no meio: tenta de novo depois
+    partes[+el.getAttribute("data-i")] = el.textContent;
+  }
+  for (let i = 0; i < tot; i++) if (partes[i] == null) return;
+  try { aplicar(JSON.parse(partes.join("")), performance.now()); versao = v; }
+  catch (e) { /* bloco incompleto: próxima leitura */ }
+}
+lerDados();
+setInterval(lerDados, 2000);
+
+// ── quadro ─────────────────────────────────────────────────────────────────
+const NB = 7; // baldes de opacidade dos fios finos (1 stroke por balde)
+const baldes = Array.from({ length: NB }, () => []);
+let tAnt = performance.now();
+
+function mover(o, dt, t) {
+  o.x += o.vx * VEL * dt; o.y += o.vy * VEL * dt;
+  if (o.x < BX) { o.x = BX; o.vx = Math.abs(o.vx); } else if (o.x > 1 - BX) { o.x = 1 - BX; o.vx = -Math.abs(o.vx); }
+  if (o.y < BY) { o.y = BY; o.vy = Math.abs(o.vy); } else if (o.y > 1 - BY) { o.y = 1 - BY; o.vy = -Math.abs(o.vy); }
+  o.px = (o.x + .012 * Math.sin(t * .30 + o.ph)) * W;
+  o.py = (o.y + .012 * Math.cos(t * .25 + o.ph * 1.3)) * H;
+}
+
+let custo = 0; // ms de JS por quadro (média móvel), só diagnóstico
+function quadro(agora) {
+  const c0 = performance.now();
+  const dt = Math.min(.1, (agora - tAnt) / 1000); tAnt = agora;
+  const t = agora / 1000;
+
+  // aparecer / sumir
+  for (const n of nodes) {
+    if (n.morre) n.a = 1 - ease((agora - n.morre) / 1200);
+    else n.a = ease((agora - n.nasce) / 1200);
+    n.r += (n.rT - n.r) * Math.min(1, dt * 2);
+  }
+  nodes = nodes.filter(n => !(n.morre && n.a <= 0));
+  if (foco && !nodes.includes(foco)) foco = null;
+  if (fixo && (!nodes.includes(fixo) || agora > fixoAte)) fixo = null;
+
+  for (const n of nodes) {
+    mover(n, dt, t);
+    const resp = 1 + .04 * Math.sin(t * 1.4 + n.ph);
+    n.rd = n.r * SC * resp * (1 + .35 * ease(n.hov)) * n.a;
+  }
+  for (const p of poeira) mover(p, dt, t);
+
+  // foco: toque fixado > mouse
+  foco = fixo || (mouse ? hit(mouse.x, mouse.y, 6) : null);
+  for (const n of nodes) n.hov = Math.max(0, Math.min(1, n.hov + (n === foco ? dt * 6 : -dt * 6)));
+
+  ctx.clearRect(0, 0, W, H);
+
+  // fios finos por proximidade
+  const pts = nodes.concat(poeira);
+  const L = S * .16, L2 = L * L;
+  for (const b of baldes) b.length = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    for (let j = i + 1; j < pts.length; j++) {
+      const b = pts[j];
+      const dx = a.px - b.px; if (dx > L || dx < -L) continue;
+      const dy = a.py - b.py; if (dy > L || dy < -L) continue;
+      const d2 = dx * dx + dy * dy; if (d2 >= L2) continue;
+      const f = (1 - Math.sqrt(d2) / L) * Math.min(a.a, b.a);
+      if (f <= .02) continue;
+      baldes[Math.min(NB - 1, (f * NB) | 0)].push(a.px, a.py, b.px, b.py);
+    }
+  }
+  // 0,6 px, mas nunca acima de 1 pixel físico: linha de 1 px usa o caminho
+  // rápido (hairline) do rasterizador — no celular (DPR 2) isso dobra o fps
+  ctx.lineWidth = Math.min(.6, 1 / DPR);
+  for (let k = 0; k < NB; k++) {
+    const arr = baldes[k]; if (!arr.length) continue;
+    ctx.strokeStyle = `rgba(20,20,20,${((k + .5) / NB * .35).toFixed(3)})`;
+    ctx.beginPath();
+    for (let i = 0; i < arr.length; i += 4) { ctx.moveTo(arr[i], arr[i + 1]); ctx.lineTo(arr[i + 2], arr[i + 3]); }
+    ctx.stroke();
+  }
+
+  // fios de relação: mesmo produto / cooperado
+  const gF = foco && !foco.morre ? gruposDe(foco).filter(g => grupos.has(g)) : [];
+  const chaveF = gF.join(",");
+  if (agora - ultimoRecalc > RECALC_MS || chaveF !== focoGrupos) {
+    recalcularFios(gF); ultimoRecalc = agora; focoGrupos = chaveF;
+  }
+  if (arestas.size) {
+    ctx.lineWidth = 1.1; ctx.strokeStyle = "rgb(20,20,20)";
+    // um stroke por fio: num path único, os fios que se cruzam viram um
+    // polígono complexo e o rasterizador (sobretudo sem GPU) engasga
+    for (const [k, e] of arestas) {
+      e.op = Math.max(0, Math.min(1, e.op + (e.alvo ? dt : -dt) / FADE_S));
+      if (!e.alvo && e.op <= 0) { arestas.delete(k); continue; }
+      const alvoLvl = !gF.length ? OP_BASE : gF.some(g => e.g.has(g)) ? OP_DESTAQUE : OP_APAGADO;
+      e.lvl = e.lvl == null ? alvoLvl : e.lvl + (alvoLvl - e.lvl) * Math.min(1, dt * 6);
+      const f = e.op * e.lvl * Math.min(e.a.a, e.b.a);
+      if (f <= .005) continue;
+      ctx.globalAlpha = f;
+      ctx.beginPath(); ctx.moveTo(e.a.px, e.a.py); ctx.lineTo(e.b.px, e.b.py); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // poeira
+  ctx.fillStyle = "#111";
+  ctx.beginPath();
+  for (const p of poeira) { ctx.moveTo(p.px + p.r, p.py); ctx.arc(p.px, p.py, p.r, 0, Math.PI * 2); }
+  ctx.fill();
+
+  // nós (o focado por último, por cima)
+  const ordem = foco ? nodes.filter(n => n !== foco).concat([foco]) : nodes;
+  for (const n of ordem) {
+    if (n.rd <= .2) continue;
+    const sp = sprite(n.kind === "tarefa" ? n.pri : n.kind, n.rT);
+    const k = n.rd / (n.rT * SC * OVER);
+    const h = sp.half * k;
+    ctx.drawImage(sp.c, n.px - h, n.py - h, h * 2, h * 2);
+    if (n.kind === "tarefa" && n.pri === "urgente") {
+      const p = (t * .6 + n.ph) % 1;
+      ctx.strokeStyle = `rgba(200,16,46,${((1 - p) * n.a).toFixed(3)})`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(n.px, n.py, n.rd * (1 + p * 2.2), 0, Math.PI * 2); ctx.stroke();
+    }
+    if (n.hov > .01) {
+      ctx.strokeStyle = `rgba(17,17,17,${(.5 * n.hov).toFixed(3)})`;
+      ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
+      ctx.beginPath(); ctx.arc(n.px, n.py, n.rd + 10, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // tooltip
+  if (foco) {
+    if (foco !== focoMostrado) { conteudo(foco); focoMostrado = foco; }
+    if (foco === fixo) posicionar(foco.px, foco.py);
+    else posicionar(mouse.x, mouse.y);
+    pop.style.opacity = 1;
+  } else if (focoMostrado) {
+    pop.style.opacity = 0; focoMostrado = null;
+  }
+  if (mouse && !foco && !cursorOculto && agora - mouseParadoDesde > 3000) cursorOculto = true;
+  if (cursorOculto && foco && foco !== fixo) { cursorOculto = false; mouseParadoDesde = agora; } // nó passou sob o cursor
+  const cur = cursorOculto ? "none" : foco && foco !== fixo ? "pointer" : "default";
+  if (cv.style.cursor !== cur) cv.style.cursor = cur;
+  custo += (performance.now() - c0 - custo) * .05;
+
+  requestAnimationFrame(quadro);
+}
+requestAnimationFrame(quadro);
+// diagnóstico (console / testes): estado da rede, sem nada na tela
+window.__descanso = () => ({ custo, nos: nodes.filter(n => !n.morre).length, fios: [...arestas.values()].filter(e => e.alvo).length,
+  destaque: [...arestas.values()].filter(e => e.alvo && e.lvl > .8).length,
+  versao, pos: nodes.filter(n => !n.morre).map(n => ({ id: n.id, x: n.px, y: n.py, r: n.rd })) });
+})();
+</script>
+</body>
+</html>
