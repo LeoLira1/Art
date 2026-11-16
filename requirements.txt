@@ -1,0 +1,5 @@
+# Mesma versão fixada no CAMDA Estoque (atualização automática já quebrou o app).
+streamlit==1.59.0
+# starlette 1.4 quebra o gzip do streamlit 1.59 (ver requirements do camda-estoque).
+starlette>=0.40.0,<1.4
+libsql>=0.1.0
