@@ -183,8 +183,12 @@ function posicionar(x, y) {
 }
 
 cv.addEventListener("pointerdown", e => { ultimoTipo = e.pointerType || "mouse"; });
+// desktop: mouse parado 3 s fora de qualquer nó → cursor some, como num descanso de tela
+let mouseParadoDesde = performance.now(), cursorOculto = false;
 cv.addEventListener("pointermove", e => {
-  if (e.pointerType === "mouse") mouse = { x: e.clientX, y: e.clientY };
+  if (e.pointerType !== "mouse") return;
+  mouse = { x: e.clientX, y: e.clientY };
+  mouseParadoDesde = performance.now(); cursorOculto = false;
 });
 cv.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") mouse = null; });
 cv.addEventListener("click", e => {
@@ -359,7 +363,9 @@ function quadro(agora) {
   } else if (focoMostrado) {
     pop.style.opacity = 0; focoMostrado = null;
   }
-  const cur = foco && foco !== fixo ? "pointer" : "default";
+  if (mouse && !foco && !cursorOculto && agora - mouseParadoDesde > 3000) cursorOculto = true;
+  if (cursorOculto && foco && foco !== fixo) { cursorOculto = false; mouseParadoDesde = agora; } // nó passou sob o cursor
+  const cur = cursorOculto ? "none" : foco && foco !== fixo ? "pointer" : "default";
   if (cv.style.cursor !== cur) cv.style.cursor = cur;
   custo += (performance.now() - c0 - custo) * .05;
 
