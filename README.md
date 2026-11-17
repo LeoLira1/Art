@@ -46,7 +46,15 @@ TURSO_AUTH_TOKEN = "..."
 Lê só duas tabelas, apenas leitura: `divergencias` (abertas) e `tarefas`
 (`feita = 0`). Recarrega a cada 5 minutos, com cache compartilhado entre telas
 abertas (uma leitura por intervalo, ~110 linhas). Se o banco falhar, mantém a
-última leitura boa.
+última leitura boa e registra `falha ao ler o Turso (mostrando dados de N min
+atrás)` no log a cada recarga.
+
+**Pulso:** cada recarga do fragmento grava a hora (`data-t`) nos blocos de
+dados. Se o pulso parar por mais de 3 intervalos + 1 min (~16 min), o websocket
+com o servidor morreu (app hibernou no Streamlit Cloud, rede caiu) e o canvas
+recarrega a página sozinho, em vez de animar dados velhos para sempre.
+`__descanso()` mostra `pulsoHa_s` (segundos desde o último pulso) e
+`dadosDe_min` (idade da última leitura boa do banco).
 
 ## Como funciona
 

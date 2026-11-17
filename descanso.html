@@ -297,12 +297,20 @@ function telaCheia() {
 
 // ── dados vindos da página do Streamlit (blocos escondidos .dsc-chunk) ──────
 let versao = null;
+// Pulso: o fragmento do Streamlit reescreve data-t a cada recarga. Se ele parar
+// de mudar (Streamlit Cloud hibernou, websocket caiu, rede da TV caiu), o canvas
+// seguiria animando os dados velhos para sempre. Então recarrega a página.
+let pulso = null, pulsoEm = performance.now(), recarga = 300, lidoEm = 0;
 function lerDados() {
   let pd;
   try { pd = window.parent.document; } catch (e) { return; }
   if (!pd) return;
   const els = pd.querySelectorAll(".dsc-chunk");
   if (!els.length) return;
+  const t = els[0].getAttribute("data-t");
+  if (t !== pulso) { pulso = t; pulsoEm = performance.now(); }
+  recarga = +els[0].getAttribute("data-r") || recarga;
+  lidoEm = +els[0].getAttribute("data-lido") || lidoEm;
   const v = els[0].getAttribute("data-v"), tot = +els[0].getAttribute("data-n");
   if (v === versao) return;
   const partes = new Array(tot);
@@ -314,8 +322,17 @@ function lerDados() {
   try { aplicar(JSON.parse(partes.join("")), performance.now()); versao = v; }
   catch (e) { /* bloco incompleto: próxima leitura */ }
 }
+function vigiaPulso() {
+  if (document.hidden) return; // aba escondida: timers ficam lentos, confere quando voltar
+  const limite = (recarga * 3 + 60) * 1000;
+  if (performance.now() - pulsoEm < limite) return;
+  pulsoEm = performance.now(); // não recarrega em laço se a página nova demorar
+  try { window.parent.location.reload(); } catch (e) { location.reload(); }
+}
 lerDados();
 setInterval(lerDados, 2000);
+setInterval(vigiaPulso, 30000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { lerDados(); vigiaPulso(); } });
 
 // ── quadro ─────────────────────────────────────────────────────────────────
 const NB = 7; // baldes de opacidade dos fios finos (1 stroke por balde)
@@ -469,7 +486,8 @@ requestAnimationFrame(quadro);
 // diagnóstico (console / testes): estado da rede, sem nada na tela
 window.__descanso = () => ({ custo, poeira: poeira.filter(p => !p.morre).length, poeiraTotal: poeira.length, nos: nodes.filter(n => !n.morre).length, fios: [...arestas.values()].filter(e => e.alvo).length,
   destaque: [...arestas.values()].filter(e => e.alvo && e.lvl > .8).length,
-  versao, pos: nodes.filter(n => !n.morre).map(n => ({ id: n.id, x: n.px, y: n.py, r: n.rd })) });
+  versao, pulsoHa_s: Math.round((performance.now() - pulsoEm) / 1000), dadosDe_min: lidoEm ? Math.round((Date.now() / 1000 - lidoEm) / 60) : null,
+  pos: nodes.filter(n => !n.morre).map(n => ({ id: n.id, x: n.px, y: n.py, r: n.rd })) });
 })();
 </script>
 </body>
