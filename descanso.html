@@ -29,7 +29,8 @@ const COR = { urgente: "#c8102e", normal: "#d9a400", quando_der: "#2e8b57" };
 const RT  = { urgente: 9, normal: 6, quando_der: 4.5 };
 const VEL = 0.0021;          // deriva, em fração da tela por segundo
 const BX = 0.06, BY = 0.10;  // margens laterais / cima-baixo
-const N_POEIRA = 70;
+const POEIRA_POR_ITEM = 0.8; // pontinhos decorativos = round(itens reais × 0,8)
+const T_FADE = 1500;         // ms para nascer (crescer) ou sumir (encolher)
 
 const cv = document.getElementById("c");
 const ctx = cv.getContext("2d");
@@ -69,7 +70,20 @@ function novoMovel(o) {
   o.ph = rnd(0, Math.PI * 2); o.px = o.x * W; o.py = o.y * H;
   return o;
 }
-const poeira = Array.from({ length: N_POEIRA }, () => novoMovel({ r: rnd(1, 2.2), a: 1 }));
+let poeira = [];             // ajustada a cada leitura de dados (ajustarPoeira)
+
+function ajustarPoeira(itens, agora, escalonar) {
+  const alvo = Math.round(itens * POEIRA_POR_ITEM);
+  const vivas = poeira.filter(p => !p.morre);
+  if (vivas.length < alvo) {
+    for (let i = vivas.length; i < alvo; i++)
+      poeira.push(novoMovel({ r: rnd(1, 2.2), a: 0, nasce: agora + (escalonar ? rnd(0, 1600) : rnd(0, 600)) }));
+  } else if (vivas.length > alvo) {
+    // as que sobram (sorteadas) encolhem e somem
+    for (let i = vivas.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [vivas[i], vivas[j]] = [vivas[j], vivas[i]]; }
+    for (const p of vivas.slice(alvo)) p.morre = agora;
+  }
+}
 
 function raioDiv(q) { return 4 + Math.sqrt(Math.abs(q)) * 3.2; }
 
@@ -98,6 +112,7 @@ function aplicar(dados, agora) {
   }
   for (const n of velhos.values()) { n.morre = agora; vivos.push(n); }
   nodes = vivos;
+  ajustarPoeira((dados.d || []).length + (dados.t || []).length, agora, primeira);
   primeira = false;
   // grupos dos fios de relação: mesmo produto (com/sem US) ou mesmo cooperado
   grupos = new Map();
@@ -323,11 +338,13 @@ function quadro(agora) {
 
   // aparecer / sumir
   for (const n of nodes) {
-    if (n.morre) n.a = 1 - ease((agora - n.morre) / 1200);
-    else n.a = ease((agora - n.nasce) / 1200);
+    if (n.morre) n.a = 1 - ease((agora - n.morre) / T_FADE);
+    else n.a = ease((agora - n.nasce) / T_FADE);
     n.r += (n.rT - n.r) * Math.min(1, dt * 2);
   }
   nodes = nodes.filter(n => !(n.morre && n.a <= 0));
+  for (const p of poeira) p.a = p.morre ? 1 - ease((agora - p.morre) / T_FADE) : ease((agora - p.nasce) / T_FADE);
+  poeira = poeira.filter(p => !(p.morre && p.a <= 0));
   if (foco && !nodes.includes(foco)) foco = null;
   if (fixo && (!nodes.includes(fixo) || agora > fixoAte)) fixo = null;
 
@@ -395,10 +412,17 @@ function quadro(agora) {
   }
 
   // poeira
+  // poeira: as já crescidas num path só; as que nascem/somem com raio e opacidade
   ctx.fillStyle = "#111";
   ctx.beginPath();
-  for (const p of poeira) { ctx.moveTo(p.px + p.r, p.py); ctx.arc(p.px, p.py, p.r, 0, Math.PI * 2); }
+  for (const p of poeira) if (p.a >= 1) { ctx.moveTo(p.px + p.r, p.py); ctx.arc(p.px, p.py, p.r, 0, Math.PI * 2); }
   ctx.fill();
+  for (const p of poeira) {
+    if (p.a >= 1 || p.a <= 0) continue;
+    ctx.globalAlpha = p.a;
+    ctx.beginPath(); ctx.arc(p.px, p.py, p.r * p.a, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
 
   // nós (o focado por último, por cima)
   const ordem = foco ? nodes.filter(n => n !== foco).concat([foco]) : nodes;
@@ -407,7 +431,9 @@ function quadro(agora) {
     const sp = sprite(n.kind === "tarefa" ? n.pri : n.kind, n.rT);
     const k = n.rd / (n.rT * SC * OVER);
     const h = sp.half * k;
+    if (n.a < 1) ctx.globalAlpha = n.a;
     ctx.drawImage(sp.c, n.px - h, n.py - h, h * 2, h * 2);
+    ctx.globalAlpha = 1;
     if (n.kind === "tarefa" && n.pri === "urgente") {
       const p = (t * .6 + n.ph) % 1;
       ctx.strokeStyle = `rgba(200,16,46,${((1 - p) * n.a).toFixed(3)})`;
@@ -441,7 +467,7 @@ function quadro(agora) {
 }
 requestAnimationFrame(quadro);
 // diagnóstico (console / testes): estado da rede, sem nada na tela
-window.__descanso = () => ({ custo, nos: nodes.filter(n => !n.morre).length, fios: [...arestas.values()].filter(e => e.alvo).length,
+window.__descanso = () => ({ custo, poeira: poeira.filter(p => !p.morre).length, poeiraTotal: poeira.length, nos: nodes.filter(n => !n.morre).length, fios: [...arestas.values()].filter(e => e.alvo).length,
   destaque: [...arestas.values()].filter(e => e.alvo && e.lvl > .8).length,
   versao, pos: nodes.filter(n => !n.morre).map(n => ({ id: n.id, x: n.px, y: n.py, r: n.rd })) });
 })();

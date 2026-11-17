@@ -11,7 +11,7 @@ aparece no tooltip ao passar o mouse num nó, ou ao tocar nele no celular/tablet
 | ● vermelho com onda | tarefa urgente (Risca) |
 | ● amarelo | tarefa normal |
 | ● verde | tarefa "quando der" |
-| · pontinhos | decoração |
+| · pontinhos | decoração: `round(itens reais × 0,8)` (divergências + tarefas pendentes) |
 
 O tamanho da falta/sobra cresce com a raiz da quantidade física
 (`4 + √|qtd| × 3,2`, escalado pelo menor lado da tela ÷ 900).
@@ -21,6 +21,10 @@ ou do mesmo cooperado (FALTANDO, SOBRANDO e Invertido não contam). Cada nó lig
 só às **2 mais próximas** do mesmo grupo, na posição atual, recalculado a cada
 ~2 s com fade (opacidade 0,35). Mouse em cima de um nó (ou toque) acende o
 grupo dele inteiro, conectado, a 0,9 e apaga o resto para 0,15.
+
+Quando o número de itens muda na recarga, a cena não é recriada: nós resolvidos
+e a poeira que sobra encolhem e somem (~1,5 s); os novos nascem pequenos e
+crescem. Sem nenhuma divergência nem tarefa, a tela fica só com o fundo liso.
 
 Toque no vazio liga/desliga a tela cheia.
 
