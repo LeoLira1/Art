@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -170,20 +171,24 @@ def _ultimo_bom() -> dict:
 
 
 @st.cache_data(ttl=max(5, RECARREGAR_S - 30), show_spinner=False)
-def carregar() -> dict:
-    """Dados para o canvas. Se o banco falhar, devolve a última leitura boa
-    (a tela não pode esvaziar por causa de um soluço de rede)."""
+def carregar() -> tuple[dict, float]:
+    """(dados para o canvas, hora da leitura boa). Se o banco falhar, devolve a
+    última leitura boa (a tela não pode esvaziar por causa de um soluço de
+    rede), mas com a hora antiga: o canvas expõe essa idade em __descanso() e
+    o log avisa a cada recarga em que a leitura falhou."""
     memo = _ultimo_bom()
     try:
         dados = _ler_banco()
         if dados is None:
-            return memo.get("dados") or {"d": [], "t": []}
-        memo["dados"] = dados
-        return dados
+            log.error("sem credenciais do Turso (TURSO_DATABASE_URL / TURSO_AUTH_TOKEN)")
+            return memo.get("dados") or {"d": [], "t": []}, memo.get("lido_em", 0.0)
+        memo["dados"], memo["lido_em"] = dados, time.time()
+        return dados, memo["lido_em"]
     except Exception as e:
-        log.warning("falha ao ler o Turso: %s", e)
+        idade = (time.time() - memo.get("lido_em", time.time())) / 60
+        log.error("falha ao ler o Turso (mostrando dados de %.0f min atrás): %s", idade, e)
         if memo.get("dados"):
-            return memo["dados"]
+            return memo["dados"], memo["lido_em"]
         raise  # sem cache bom: não guarda o vazio no cache_data
 
 
@@ -195,17 +200,20 @@ with st.container(key="dsc_canvas"):
 @st.fragment(run_every=RECARREGAR_S)
 def _dados():
     try:
-        dados = carregar()
+        dados, lido_em = carregar()
     except Exception:
-        dados = {"d": [], "t": []}
+        dados, lido_em = {"d": [], "t": []}, 0.0
     s = json.dumps(dados, ensure_ascii=False, separators=(",", ":"))
     v = hashlib.sha1(s.encode("utf-8")).hexdigest()[:12]
     partes = [s[i:i + CHUNK] for i in range(0, len(s), CHUNK)] or [""]
+    # data-t muda a cada execução do fragmento (pulso): se parar de mudar, a
+    # conexão com o servidor morreu e o canvas recarrega a página sozinho.
+    pulso = f'data-t="{time.time():.0f}" data-r="{RECARREGAR_S}" data-lido="{lido_em:.0f}"'
     with st.container(key="dsc_dados"):
         for i, p in enumerate(partes):
             st.html(
-                f'<div class="dsc-chunk" data-v="{v}" data-i="{i}" '
-                f'data-n="{len(partes)}" hidden>{html.escape(p, quote=False)}</div>'
+                f'<div class="dsc-chunk" data-v="{v}" data-i="{i}" data-n="{len(partes)}" '
+                f'{pulso} hidden>{html.escape(p, quote=False)}</div>'
             )
 
 
