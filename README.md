@@ -28,6 +28,17 @@ crescem. Sem nenhuma divergência nem tarefa, a tela fica só com o fundo liso.
 
 Toque no vazio liga/desliga a tela cheia.
 
+## Busca
+
+Barra de vidro fosco no canto inferior direito (fica meio apagada até passar o
+mouse; `/` ou `Ctrl+K` foca). Busca cooperado, produto (nome ou código, com ou
+sem `US`) e tarefa, com autocompletar. Ignora acento e maiúscula, tolera erro de
+digitação e apelido (`serginho` → SERGIO). Enquanto digita, o que casa já se
+destaca; ao escolher uma sugestão (clique, Enter ou Tab), ficam só as
+divergências daquele cooperado/produto: crescem um pouco, ganham anel e um
+cacho de fios próprio, e o resto apaga. A escolha sobrevive às recargas de
+dados. `Esc` ou `×` limpa.
+
 ## Rodar
 
 ```bash

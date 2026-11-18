@@ -16,11 +16,66 @@
   #pop .n { font-size: 14px; font-weight: 500; margin-top: 4px; }
   #pop .s { opacity: .75; margin-top: 3px; }
   #pop .s:empty { display: none; }
+
+  /* busca: vidro fosco, canto inferior direito */
+  #busca { position: fixed; z-index: 6; width: 210px;
+           right: max(18px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom));
+           opacity: .5; transition: opacity .4s ease, width .45s cubic-bezier(.2,.8,.2,1);
+           font: 13px/1.35 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #111; }
+  #busca:hover, #busca:focus-within, #busca.ativo { opacity: 1; }
+  #busca:focus-within, #busca.ativo { width: min(330px, calc(100vw - 36px)); }
+  .vidro { background: rgba(255,255,255,.34);
+           -webkit-backdrop-filter: blur(18px) saturate(170%); backdrop-filter: blur(18px) saturate(170%);
+           border: 1px solid rgba(255,255,255,.65);
+           box-shadow: 0 10px 34px rgba(0,0,0,.09), inset 0 1px 0 rgba(255,255,255,.75); }
+  #busca .campo { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 14px;
+                  border-radius: 999px; cursor: text; box-sizing: border-box; }
+  #busca .ico { width: 15px; height: 15px; flex: none; opacity: .55; }
+  #busca input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; padding: 0;
+                 font: inherit; color: #111; letter-spacing: .01em; }
+  #busca input::placeholder { color: rgba(17,17,17,.38); }
+  #busca .cont { font-size: 11px; font-variant-numeric: tabular-nums; color: rgba(17,17,17,.5);
+                 white-space: nowrap; }
+  #busca .cont:empty { display: none; }
+  #busca .x { flex: none; width: 24px; height: 24px; border: 0; border-radius: 50%; padding: 0;
+              background: rgba(17,17,17,.07); color: #111; cursor: pointer; font-size: 14px; line-height: 24px;
+              display: none; }
+  #busca .x:hover { background: rgba(17,17,17,.14); }
+  #busca.tem .x { display: block; }
+  #sug { position: absolute; left: 0; right: 0; bottom: 48px; margin: 0; padding: 6px; list-style: none;
+         border-radius: 16px; max-height: min(52vh, 360px); overflow-y: auto; display: none; }
+  #sug.aberto { display: block; animation: sobe .22s ease; }
+  @keyframes sobe { from { opacity: 0; transform: translateY(6px); } }
+  #sug li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; cursor: pointer; }
+  #sug li.sel { background: rgba(17,17,17,.07); }
+  #sug .pt { width: 9px; height: 9px; border-radius: 50%; flex: none; background: #111; }
+  #sug .pt.produto { background: transparent; box-shadow: inset 0 0 0 2px #111; }
+  #sug .pt.tarefa { background: #d9a400; }
+  #sug .tx { min-width: 0; flex: 1; }
+  #sug .nm { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sug .nm mark { background: none; color: inherit; font-weight: 600; }
+  #sug .sb { display: block; font-size: 11px; color: rgba(17,17,17,.5); margin-top: 1px; }
+  #sug .tp { font-size: 9px; letter-spacing: .16em; text-transform: uppercase; color: rgba(17,17,17,.4); flex: none; }
+  @media (max-width: 480px) {
+    #busca { width: 40px; }
+    #busca .campo { padding: 0 0 0 12px; }
+  }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="pop"><div class="k"></div><div class="n"></div><div class="s"></div></div>
+<div id="busca">
+  <ul id="sug" class="vidro" role="listbox"></ul>
+  <div class="campo vidro">
+    <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="#111" stroke-width="1.6" stroke-linecap="round">
+      <circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>
+    <input id="q" type="text" placeholder="buscar" autocomplete="off" spellcheck="false"
+           aria-label="Buscar cooperado, produto ou tarefa" role="combobox" aria-controls="sug">
+    <span class="cont"></span>
+    <button class="x" type="button" aria-label="Limpar busca">×</button>
+  </div>
+</div>
 <script>
 (() => {
 "use strict";
@@ -122,6 +177,7 @@ function aplicar(dados, agora) {
   }
   for (const [g, l] of grupos) if (l.length < 2) grupos.delete(g);
   ultimoRecalc = -1e9; // recalcula os fios já no próximo quadro
+  construirIndice();
 }
 
 // ── fios de relação ────────────────────────────────────────────────────────
@@ -144,6 +200,18 @@ function gruposDe(n) {
 }
 const d2 = (a, b) => (a.px - b.px) ** 2 + (a.py - b.py) ** 2;
 
+function arvore(vivos, add, g) { // Prim: garante o cacho inteiro conectado
+  const dentro = [vivos[0]], fora = vivos.slice(1);
+  while (fora.length) {
+    let bd = Infinity, par = null, bi = -1;
+    for (const a of dentro) for (let i = 0; i < fora.length; i++) {
+      const d = d2(a, fora[i]); if (d < bd) { bd = d; par = [a, fora[i]]; bi = i; }
+    }
+    add(par[0], par[1], g);
+    dentro.push(fora.splice(bi, 1)[0]);
+  }
+}
+
 function recalcularFios(gFoco) {
   const quer = new Map();
   const add = (a, b, g) => {
@@ -161,17 +229,11 @@ function recalcularFios(gFoco) {
       viz.sort((x, y) => x[1] - y[1]);
       for (let i = 0; i < Math.min(K_VIZ, viz.length); i++) add(a, viz[i][0], g);
     }
-    if (gFoco.includes(g)) { // Prim: garante o cacho inteiro conectado
-      const dentro = [vivos[0]], fora = vivos.slice(1);
-      while (fora.length) {
-        let bd = Infinity, par = null, bi = -1;
-        for (const a of dentro) for (let i = 0; i < fora.length; i++) {
-          const d = d2(a, fora[i]); if (d < bd) { bd = d; par = [a, fora[i]]; bi = i; }
-        }
-        add(par[0], par[1], g);
-        dentro.push(fora.splice(bi, 1)[0]);
-      }
-    }
+    if (gFoco.includes(g)) arvore(vivos, add, g);
+  }
+  if (selecao) { // busca: o resultado inteiro ligado por um cacho próprio
+    const vivos = [...selecao].filter(n => !n.morre);
+    if (vivos.length >= 2) arvore(vivos, add, G_BUSCA);
   }
   for (const [k, e] of arestas) if (!quer.has(k)) e.alvo = 0;
   for (const [k, q] of quer) {
@@ -182,7 +244,7 @@ function recalcularFios(gFoco) {
 }
 
 // ── sprites (sombra pré-renderizada: shadowBlur por quadro trava celular) ──
-const OVER = 1.42; // cabe o hover (+35%) e a respiração (+4%) sem perder nitidez
+const OVER = 1.65; // cabe o hover (+35%), a busca (+15%) e a respiração (+4%) sem perder nitidez
 function sprite(kind, rBase) {
   const R = rBase * SC * OVER;
   const key = kind + "|" + Math.round(R * DPR * 2);
@@ -295,6 +357,212 @@ function telaCheia() {
   tenta(0);
 }
 
+// ── busca inteligente ──────────────────────────────────────────────────────
+// Indexa cooperados, produtos (nome + código, com/sem US) e tarefas. Tolera
+// acento, maiúscula, erro de digitação e apelido ("serginho" → SERGIO).
+// Enquanto digita, o que casa já se destaca; ao escolher uma sugestão, fica só
+// aquele cooperado/produto/tarefa. O resto apaga e o resultado ganha um cacho
+// de fios próprio. Esc ou × limpa.
+const G_BUSCA = "B:busca";
+const elB = document.getElementById("busca"), elQ = document.getElementById("q");
+const elSug = document.getElementById("sug"), elCont = elB.querySelector(".cont");
+const normTxt = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "")
+  .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+let indice = [], sugs = [], selIdx = 0, escolhido = null, selecao = null, selChave = "";
+
+function lev(a, b) {
+  const m = a.length, n = b.length; let p = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const c = [i];
+    for (let j = 1; j <= n; j++) c[j] = Math.min(p[j] + 1, c[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    p = c;
+  }
+  return p[n];
+}
+function pontuar(q, alvo) {
+  if (!q || !alvo) return 0;
+  if (alvo === q) return 1000;
+  if (alvo.startsWith(q)) return 900;
+  const ws = alvo.split(" ");
+  if (ws.some(w => w.startsWith(q))) return 800;
+  const qt = q.split(" ");
+  if (qt.length > 1 && qt.every(t => ws.some(w => w.startsWith(t)))) return 700;
+  if (alvo.includes(q)) return 600;
+  if (q.length >= 3 && qt.length === 1) { // erro de digitação no começo de uma palavra
+    const tol = q.length >= 6 ? 2 : 1; let best = 9;
+    for (const w of ws) if (w.length >= q.length - tol) best = Math.min(best, lev(q, w.slice(0, q.length)));
+    if (best <= tol) return 500 - best * 60;
+  }
+  if (q.length >= 5 && qt.length === 1) { // apelido / diminutivo: serginho → sergio, zezinho → ze
+    const raiz = q.replace(/(zinh[oa]s?|inh[oa]s?|zao|ao|ito|ita|ola)$/, "");
+    const r = raiz.length >= 2 && raiz !== q ? raiz : q.slice(0, 4);
+    if (ws.some(w => w.startsWith(r))) return 350;
+  }
+  return 0;
+}
+
+function resumo(nos) {
+  const f = nos.filter(n => n.kind === "falta").length, s = nos.length - f;
+  return [f && f + (f > 1 ? " faltas" : " falta"), s && s + (s > 1 ? " sobras" : " sobra")].filter(Boolean).join(" · ");
+}
+function construirIndice() {
+  const coops = new Map(), prods = new Map(), tars = [];
+  for (const n of nodes) {
+    if (n.morre) continue;
+    if (n.kind === "tarefa") {
+      tars.push({ tipo: "tarefa", chave: "T:" + n.id, rotulo: n.nome, norm: normTxt(n.nome),
+                  sub: "tarefa " + n.pri.replace("_", " "), nos: [n] });
+      continue;
+    }
+    if (n.chC) {
+      let e = coops.get(n.chC);
+      if (!e) coops.set(n.chC, e = { tipo: "cooperado", chave: "C:" + n.chC, rotulo: n.coop, norm: normTxt(n.coop), nos: [] });
+      e.nos.push(n);
+    }
+    const kp = n.chP || normTxt(n.nome);
+    let e = prods.get(kp);
+    if (!e) prods.set(kp, e = { tipo: "produto", chave: "P:" + kp, rotulo: n.nome, cod: n.cod,
+                                norm: normTxt(n.nome), normCod: normTxt(n.chP), nos: [] });
+    e.nos.push(n);
+  }
+  for (const e of coops.values()) e.sub = resumo(e.nos);
+  for (const e of prods.values()) e.sub = (e.cod ? e.cod + " · " : "") + resumo(e.nos);
+  indice = [...coops.values(), ...prods.values(), ...tars];
+  atualizarBusca(false);
+}
+
+const PESO = { cooperado: 3, produto: 2, tarefa: 1 };
+function candidatos(qRaw) {
+  const q = normTxt(qRaw);
+  if (!q) return [];
+  const qc = normTxt(normCod(qRaw));
+  const out = [];
+  for (const e of indice) {
+    let p = pontuar(q, e.norm);
+    if (e.normCod) p = Math.max(p, pontuar(qc, e.normCod) + (qc === e.normCod ? 50 : 0));
+    if (p > 0) out.push([p + PESO[e.tipo] + Math.min(e.nos.length, 9) * .1, e]);
+  }
+  out.sort((a, b) => b[0] - a[0]);
+  return out;
+}
+
+function realce(el, rotulo, qRaw) {
+  // casa sem acento/maiúscula mas mostra o texto original; marca cada palavra buscada
+  const base = [...rotulo].map(c => c.normalize("NFD")[0].toLowerCase()).join("");
+  const marcas = new Array(base.length).fill(false);
+  for (const t of normTxt(qRaw).split(" ")) {
+    if (!t) continue;
+    const re = new RegExp("(^|[^a-z0-9])" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const m = re.exec(base);
+    if (m) for (let i = m.index + m[1].length; i < m.index + m[1].length + t.length; i++) marcas[i] = true;
+  }
+  el.textContent = "";
+  const chars = [...rotulo];
+  let i = 0;
+  while (i < chars.length) {
+    const on = marcas[i]; let j = i;
+    while (j < chars.length && marcas[j] === on) j++;
+    const txt = chars.slice(i, j).join("");
+    if (on) { const mk = document.createElement("mark"); mk.textContent = txt; el.appendChild(mk); }
+    else el.appendChild(document.createTextNode(txt));
+    i = j;
+  }
+}
+
+function desenharSug() {
+  elSug.textContent = "";
+  const aberto = document.activeElement === elQ && sugs.length && !escolhido;
+  elSug.classList.toggle("aberto", !!aberto);
+  elQ.setAttribute("aria-expanded", aberto ? "true" : "false");
+  if (!aberto) return;
+  sugs.forEach((e, i) => {
+    const li = document.createElement("li");
+    li.setAttribute("role", "option"); if (i === selIdx) li.className = "sel";
+    li.innerHTML = '<span class="pt"></span><span class="tx"><span class="nm"></span><span class="sb"></span></span><span class="tp"></span>';
+    li.querySelector(".pt").classList.add(e.tipo);
+    realce(li.querySelector(".nm"), e.rotulo, elQ.value);
+    li.querySelector(".sb").textContent = e.sub;
+    li.querySelector(".tp").textContent = e.tipo;
+    li.addEventListener("pointerdown", ev => ev.preventDefault()); // não tira o foco do campo
+    li.addEventListener("click", () => escolher(e));
+    li.addEventListener("pointerenter", () => { if (selIdx !== i) { selIdx = i; marcarSel(); } });
+    elSug.appendChild(li);
+  });
+}
+function marcarSel() {
+  [...elSug.children].forEach((li, i) => li.classList.toggle("sel", i === selIdx));
+  const li = elSug.children[selIdx]; if (li) li.scrollIntoView({ block: "nearest" });
+}
+
+function definirSelecao(nos) {
+  selecao = nos ? new Set(nos) : null;
+  const ch = nos ? nos.map(n => n.id).sort().join(",") : "";
+  if (ch !== selChave) { selChave = ch; ultimoRecalc = -1e9; }
+  const tem = !!elQ.value.trim();
+  elB.classList.toggle("tem", tem);
+  elB.classList.toggle("ativo", tem);
+  elCont.textContent = !selecao ? "" : selecao.size ? String(selecao.size) : "nada";
+  elCont.title = selecao ? resumo([...selecao].filter(n => n.kind !== "tarefa")) : "";
+}
+
+// novo texto (ou dados novos): recalcula sugestões e o destaque
+function atualizarBusca(digitando) {
+  const q = elQ.value;
+  if (escolhido) { // escolha fixa: segue o mesmo cooperado/produto depois da recarga
+    const e = indice.find(x => x.chave === escolhido);
+    definirSelecao(e ? e.nos : []);
+    return;
+  }
+  const c = normTxt(q).length >= 2 ? candidatos(q) : [];
+  sugs = c.slice(0, 7).map(x => x[1]);
+  if (digitando) selIdx = 0;
+  selIdx = Math.min(selIdx, Math.max(0, sugs.length - 1));
+  if (!normTxt(q)) definirSelecao(null);
+  else if (normTxt(q).length < 2) definirSelecao(null);
+  else {
+    // prévia ao vivo: só a "faixa" de melhor pontuação (exato > prefixo > ... > apelido)
+    const best = c.length ? c[0][0] : 0, corte = best >= 600 ? 600 : best - 120;
+    const nos = new Set();
+    for (const [p, e] of c) if (p >= corte) for (const n of e.nos) nos.add(n);
+    definirSelecao([...nos]);
+  }
+  desenharSug();
+}
+function escolher(e) {
+  escolhido = e.chave; elQ.value = e.rotulo;
+  atualizarBusca(false); desenharSug();
+  elQ.blur();
+}
+function limparBusca() {
+  escolhido = null; elQ.value = ""; sugs = [];
+  atualizarBusca(false);
+}
+
+elQ.addEventListener("input", () => { escolhido = null; atualizarBusca(true); });
+elQ.addEventListener("focus", () => { if (escolhido) { escolhido = null; atualizarBusca(true); elQ.select(); } else desenharSug(); });
+elQ.addEventListener("blur", () => setTimeout(desenharSug, 0));
+elQ.addEventListener("keydown", ev => {
+  if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+    if (!sugs.length) return;
+    ev.preventDefault();
+    selIdx = (selIdx + (ev.key === "ArrowDown" ? 1 : -1) + sugs.length) % sugs.length;
+    marcarSel();
+  } else if (ev.key === "Enter" || (ev.key === "Tab" && sugs.length && elQ.value)) {
+    if (sugs[selIdx]) { ev.preventDefault(); escolher(sugs[selIdx]); }
+  } else if (ev.key === "Escape") {
+    ev.preventDefault();
+    if (elQ.value) limparBusca(); else elQ.blur();
+  }
+});
+elB.querySelector(".campo").addEventListener("click", e => { if (e.target === e.currentTarget || e.target.closest(".ico")) elQ.focus(); });
+elB.querySelector(".x").addEventListener("pointerdown", ev => ev.preventDefault());
+elB.querySelector(".x").addEventListener("click", () => { limparBusca(); });
+document.addEventListener("keydown", ev => {
+  if (document.activeElement === elQ) return;
+  if (ev.key === "/" || ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "k")) { ev.preventDefault(); elQ.focus(); }
+  else if (ev.key === "Escape" && elQ.value) limparBusca();
+});
+
 // ── dados vindos da página do Streamlit (blocos escondidos .dsc-chunk) ──────
 let versao = null;
 // Pulso: o fragmento do Streamlit reescreve data-t a cada recarga. Se ele parar
@@ -348,6 +616,7 @@ function mover(o, dt, t) {
 }
 
 let custo = 0; // ms de JS por quadro (média móvel), só diagnóstico
+let visPoeira = 1;
 function quadro(agora) {
   const c0 = performance.now();
   const dt = Math.min(.1, (agora - tAnt) / 1000); tAnt = agora;
@@ -365,12 +634,19 @@ function quadro(agora) {
   if (foco && !nodes.includes(foco)) foco = null;
   if (fixo && (!nodes.includes(fixo) || agora > fixoAte)) fixo = null;
 
+  // busca: o que casa cresce um pouco e ganha anel; o resto apaga
+  const kB = Math.min(1, dt * 4);
+  const visFora = selecao && selecao.size ? .12 : .4;
   for (const n of nodes) {
     mover(n, dt, t);
+    const dentro = selecao && selecao.has(n);
+    n.vis = (n.vis ?? 1) + ((!selecao || dentro ? 1 : visFora) - (n.vis ?? 1)) * kB;
+    n.selA = (n.selA || 0) + ((dentro ? 1 : 0) - (n.selA || 0)) * kB;
     const resp = 1 + .04 * Math.sin(t * 1.4 + n.ph);
-    n.rd = n.r * SC * resp * (1 + .35 * ease(n.hov)) * n.a;
+    n.rd = n.r * SC * resp * (1 + .35 * ease(n.hov)) * (1 + .15 * n.selA) * n.a;
   }
-  for (const p of poeira) mover(p, dt, t);
+  visPoeira += ((selecao ? .2 : 1) - visPoeira) * kB;
+  for (const p of poeira) { mover(p, dt, t); p.vis = visPoeira; }
 
   // foco: toque fixado > mouse
   foco = fixo || (mouse ? hit(mouse.x, mouse.y, 6) : null);
@@ -389,7 +665,7 @@ function quadro(agora) {
       const dx = a.px - b.px; if (dx > L || dx < -L) continue;
       const dy = a.py - b.py; if (dy > L || dy < -L) continue;
       const d2 = dx * dx + dy * dy; if (d2 >= L2) continue;
-      const f = (1 - Math.sqrt(d2) / L) * Math.min(a.a, b.a);
+      const f = (1 - Math.sqrt(d2) / L) * Math.min(a.a * a.vis, b.a * b.vis);
       if (f <= .02) continue;
       baldes[Math.min(NB - 1, (f * NB) | 0)].push(a.px, a.py, b.px, b.py);
     }
@@ -407,7 +683,7 @@ function quadro(agora) {
 
   // fios de relação: mesmo produto / cooperado
   const gF = foco && !foco.morre ? gruposDe(foco).filter(g => grupos.has(g)) : [];
-  const chaveF = gF.join(",");
+  const chaveF = gF.join(",") + "#" + selChave;
   if (agora - ultimoRecalc > RECALC_MS || chaveF !== focoGrupos) {
     recalcularFios(gF); ultimoRecalc = agora; focoGrupos = chaveF;
   }
@@ -418,7 +694,9 @@ function quadro(agora) {
     for (const [k, e] of arestas) {
       e.op = Math.max(0, Math.min(1, e.op + (e.alvo ? dt : -dt) / FADE_S));
       if (!e.alvo && e.op <= 0) { arestas.delete(k); continue; }
-      const alvoLvl = !gF.length ? OP_BASE : gF.some(g => e.g.has(g)) ? OP_DESTAQUE : OP_APAGADO;
+      const alvoLvl = gF.length ? (gF.some(g => e.g.has(g)) ? OP_DESTAQUE : OP_APAGADO)
+        : selecao ? (e.g.has(G_BUSCA) || (selecao.has(e.a) && selecao.has(e.b)) ? OP_DESTAQUE : .06)
+        : OP_BASE;
       e.lvl = e.lvl == null ? alvoLvl : e.lvl + (alvoLvl - e.lvl) * Math.min(1, dt * 6);
       const f = e.op * e.lvl * Math.min(e.a.a, e.b.a);
       if (f <= .005) continue;
@@ -431,12 +709,13 @@ function quadro(agora) {
   // poeira
   // poeira: as já crescidas num path só; as que nascem/somem com raio e opacidade
   ctx.fillStyle = "#111";
+  ctx.globalAlpha = visPoeira;
   ctx.beginPath();
   for (const p of poeira) if (p.a >= 1) { ctx.moveTo(p.px + p.r, p.py); ctx.arc(p.px, p.py, p.r, 0, Math.PI * 2); }
   ctx.fill();
   for (const p of poeira) {
     if (p.a >= 1 || p.a <= 0) continue;
-    ctx.globalAlpha = p.a;
+    ctx.globalAlpha = p.a * visPoeira;
     ctx.beginPath(); ctx.arc(p.px, p.py, p.r * p.a, 0, Math.PI * 2); ctx.fill();
   }
   ctx.globalAlpha = 1;
@@ -448,12 +727,21 @@ function quadro(agora) {
     const sp = sprite(n.kind === "tarefa" ? n.pri : n.kind, n.rT);
     const k = n.rd / (n.rT * SC * OVER);
     const h = sp.half * k;
-    if (n.a < 1) ctx.globalAlpha = n.a;
+    const al = n.a * n.vis;
+    if (al < 1) ctx.globalAlpha = al;
     ctx.drawImage(sp.c, n.px - h, n.py - h, h * 2, h * 2);
     ctx.globalAlpha = 1;
+    if (n.selA > .01) { // resultado da busca: anel fino + onda lenta
+      const p = (t * .45 + n.ph) % 1;
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = `rgba(17,17,17,${(.55 * n.selA * n.a).toFixed(3)})`;
+      ctx.beginPath(); ctx.arc(n.px, n.py, n.rd + 5, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = `rgba(17,17,17,${(.3 * (1 - p) * n.selA * n.a).toFixed(3)})`;
+      ctx.beginPath(); ctx.arc(n.px, n.py, n.rd + 5 + p * n.rd * 1.6, 0, Math.PI * 2); ctx.stroke();
+    }
     if (n.kind === "tarefa" && n.pri === "urgente") {
       const p = (t * .6 + n.ph) % 1;
-      ctx.strokeStyle = `rgba(200,16,46,${((1 - p) * n.a).toFixed(3)})`;
+      ctx.strokeStyle = `rgba(200,16,46,${((1 - p) * al).toFixed(3)})`;
       ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.arc(n.px, n.py, n.rd * (1 + p * 2.2), 0, Math.PI * 2); ctx.stroke();
     }
@@ -486,6 +774,7 @@ requestAnimationFrame(quadro);
 // diagnóstico (console / testes): estado da rede, sem nada na tela
 window.__descanso = () => ({ custo, poeira: poeira.filter(p => !p.morre).length, poeiraTotal: poeira.length, nos: nodes.filter(n => !n.morre).length, fios: [...arestas.values()].filter(e => e.alvo).length,
   destaque: [...arestas.values()].filter(e => e.alvo && e.lvl > .8).length,
+  busca: { q: elQ.value, escolhido, resultado: selecao ? [...selecao].map(n => n.id) : null, sugestoes: sugs.map(e => e.tipo + ":" + e.rotulo) },
   versao, pulsoHa_s: Math.round((performance.now() - pulsoEm) / 1000), dadosDe_min: lidoEm ? Math.round((Date.now() / 1000 - lidoEm) / 60) : null,
   pos: nodes.filter(n => !n.morre).map(n => ({ id: n.id, x: n.px, y: n.py, r: n.rd })) });
 })();
