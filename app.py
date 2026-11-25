@@ -1,7 +1,7 @@
 """Descanso de tela da CAMDA — rede de nós e fios, sem nenhum texto na tela.
 
-Faltas, sobras (tabela `divergencias`) e tarefas pendentes do Risca (tabela
-`tarefas`) do mesmo banco Turso do CAMDA Estoque viram bolinhas flutuando.
+Faltas e sobras (tabela `divergencias`) do mesmo banco Turso do CAMDA Estoque
+viram bolinhas flutuando. As tarefas do Risca não aparecem no descanso.
 A informação só aparece num tooltip ao passar o mouse (ou tocar) num nó.
 
 Como a animação não "pula" ao recarregar
@@ -85,7 +85,7 @@ def _segredo(nome: str) -> str:
 
 def _conectar():
     """Conexão remota com o Turso (HTTP). Sem réplica local: a leitura é
-    pequena (~100 divergências + tarefas pendentes) e roda 1x a cada 5 min,
+    pequena (~100 divergências) e roda 1x a cada 5 min,
     compartilhada por todas as telas abertas (cache_data)."""
     import libsql
 
@@ -126,8 +126,6 @@ def qtd_fisica(produto: str, qtd: int) -> str:
     return f"{q} frasco" if q == 1 else f"{q} frascos"
 
 
-_PRIO = {1: "urgente", 2: "normal", 3: "quando_der"}
-
 
 def _ler_banco() -> dict | None:
     conn = _conectar()
@@ -145,19 +143,7 @@ def _ler_banco() -> dict | None:
                 int(i), str(cod or "").strip(), str(prod or "").strip(), delta,
                 str(coop or "").strip(), qtd_fisica(prod, delta),
             ])
-        try:
-            trows = conn.execute(
-                "SELECT id, prioridade, texto, COALESCE(prazo, '') "
-                "FROM tarefas WHERE feita = 0"
-            ).fetchall()
-        except Exception as e:  # tabela ainda não criada pelo Risca
-            log.warning("tarefas indisponível: %s", e)
-            trows = []
-        tar = [
-            [str(i), _PRIO.get(int(p or 2), "normal"), str(t or "").strip(), str(pz or "")]
-            for i, p, t, pz in trows
-        ]
-        return {"d": div, "t": tar}
+        return {"d": div, "t": []}  # tarefas fora do descanso
     finally:
         try:
             conn.close()
