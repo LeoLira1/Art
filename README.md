@@ -8,9 +8,6 @@ aparece no tooltip ao passar o mouse num nó, ou ao tocar nele no celular/tablet
 |---|---|
 | ● preto sólido | falta (divergência aberta) |
 | ○ vazado | sobra |
-| ● vermelho com onda | tarefa urgente (Risca) |
-| ● amarelo | tarefa normal |
-| ● verde | tarefa "quando der" |
 
 O tamanho da falta/sobra cresce com a raiz da quantidade física
 (`4 + √|qtd| × 3,2`, escalado pelo menor lado da tela ÷ 900).
@@ -22,7 +19,7 @@ só às **2 mais próximas** do mesmo grupo, na posição atual, recalculado a c
 grupo dele inteiro, conectado, a 0,9 e apaga o resto para 0,15.
 
 Quando o número de itens muda na recarga, a cena não é recriada: nós resolvidos
-encolhem e somem (~1,5 s); os novos nascem pequenos e crescem. Sem nenhuma divergência nem tarefa, a tela fica só com o fundo liso.
+encolhem e somem (~1,5 s); os novos nascem pequenos e crescem. Sem nenhuma divergência, a tela fica só com o fundo liso.
 
 Toque no vazio liga/desliga a tela cheia.
 
@@ -30,7 +27,7 @@ Toque no vazio liga/desliga a tela cheia.
 
 Barra de vidro fosco no canto inferior direito (fica meio apagada até passar o
 mouse; `/` ou `Ctrl+K` foca). Busca cooperado, produto (nome ou código, com ou
-sem `US`) e tarefa, com autocompletar. Ignora acento e maiúscula, tolera erro de
+sem `US`), com autocompletar. Ignora acento e maiúscula, tolera erro de
 digitação e apelido (`serginho` → SERGIO). Enquanto digita, o que casa já se
 destaca; ao escolher uma sugestão (clique, Enter ou Tab), ficam só as
 divergências daquele cooperado/produto: crescem um pouco, ganham anel e um
@@ -52,9 +49,9 @@ TURSO_DATABASE_URL = "libsql://..."
 TURSO_AUTH_TOKEN = "..."
 ```
 
-Lê só duas tabelas, apenas leitura: `divergencias` (abertas) e `tarefas`
-(`feita = 0`). Recarrega a cada 5 minutos, com cache compartilhado entre telas
-abertas (uma leitura por intervalo, ~110 linhas). Se o banco falhar, mantém a
+Lê só a tabela `divergencias` (abertas), apenas leitura; as tarefas do Risca
+não entram no descanso. Recarrega a cada 5 minutos, com cache compartilhado entre telas
+abertas (uma leitura por intervalo, ~100 linhas). Se o banco falhar, mantém a
 última leitura boa e registra `falha ao ler o Turso (mostrando dados de N min
 atrás)` no log a cada recarga.
 
